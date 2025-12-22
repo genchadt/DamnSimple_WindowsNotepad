@@ -5,6 +5,9 @@ using System.Windows.Forms;
 
 namespace DamnSimple_WindowsNotepad
 {
+    /// <summary>
+    /// Simple About box displaying version and copyright info.
+    /// </summary>
     public class AboutDialog : Form
     {
         [DllImport("dwmapi.dll", PreserveSig = true)]
@@ -18,10 +21,11 @@ namespace DamnSimple_WindowsNotepad
             this.StartPosition = FormStartPosition.CenterParent;
             this.MaximizeBox = false;
             this.MinimizeBox = false;
+            this.AutoScaleMode = AutoScaleMode.Font;
 
             Label lblTitle = new Label
             {
-                Text = "Windows XP Notepad Clone",
+                Text = "Damn Simple Notepad",
                 Font = new Font("Segoe UI", 12, FontStyle.Bold),
                 Location = new Point(20, 20),
                 AutoSize = true
@@ -29,7 +33,7 @@ namespace DamnSimple_WindowsNotepad
 
             Label lblDetails = new Label
             {
-                Text = "Version 1.0\n© 2025 Your Name\n\nThis product is licensed under the terms of the \nMIT License for open-source software development.",
+                Text = "Version 0.0.1\n© 2025 GenChadT\n\nThis product is licensed under the terms of the \nGNU General Public License v3.0.",
                 Location = new Point(20, 60),
                 AutoSize = true
             };
@@ -54,9 +58,11 @@ namespace DamnSimple_WindowsNotepad
             DwmSetWindowAttribute(this.Handle, 20, ref useDark, sizeof(int));
 
             this.BackColor = dark ? Color.FromArgb(45, 45, 48) : SystemColors.Control;
+
             foreach (Control c in this.Controls)
             {
                 c.ForeColor = dark ? Color.White : SystemColors.ControlText;
+
                 if (c is Button b)
                 {
                     b.BackColor = dark ? Color.FromArgb(63, 63, 70) : SystemColors.ButtonFace;

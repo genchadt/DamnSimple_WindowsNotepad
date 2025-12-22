@@ -5,9 +5,12 @@ using System.Windows.Forms;
 
 namespace DamnSimple_WindowsNotepad
 {
+    /// <summary>
+    /// A dialog to jump to a specific line number.
+    /// </summary>
     public class GoToDialog : Form
     {
-        private TextBox _editor;
+        private RichTextBox _editor;
 
         // UI Controls
         private Label lblLine = new Label { Text = "Line number:", Location = new Point(10, 10), AutoSize = true };
@@ -15,16 +18,14 @@ namespace DamnSimple_WindowsNotepad
         private Button btnGo = new Button { Text = "Go To", Location = new Point(55, 65), Width = 80 };
         private Button btnCancel = new Button { Text = "Cancel", Location = new Point(140, 65), Width = 80 };
 
-        // P/Invoke to handle Dark Mode title bar
         [DllImport("dwmapi.dll", PreserveSig = true)]
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
         private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
 
-        public GoToDialog(TextBox editor, bool isDarkMode)
+        public GoToDialog(RichTextBox editor, bool isDarkMode)
         {
             _editor = editor;
 
-            // Form Setup
             this.Text = "Go To Line";
             this.Size = new Size(250, 140);
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -32,35 +33,29 @@ namespace DamnSimple_WindowsNotepad
             this.MaximizeBox = false;
             this.MinimizeBox = false;
             this.ShowInTaskbar = false;
+            this.AutoScaleMode = AutoScaleMode.Font; // High DPI support
 
-            // Add Controls
             this.Controls.AddRange(new Control[] { lblLine, txtLine, btnGo, btnCancel });
 
-            // Set Default Actions
             this.AcceptButton = btnGo;
             this.CancelButton = btnCancel;
 
-            // Events
             btnGo.Click += (s, e) => HandleGo();
             btnCancel.Click += (s, e) => this.DialogResult = DialogResult.Cancel;
 
-            // Apply Theme
             ApplyTheme(isDarkMode);
         }
 
         private void ApplyTheme(bool dark)
         {
-            // 1. Force Title Bar Theme
             int useDark = dark ? 1 : 0;
             DwmSetWindowAttribute(this.Handle, DWMWA_USE_IMMERSIVE_DARK_MODE, ref useDark, sizeof(int));
 
-            // 2. Control Colors
             Color backColor = dark ? Color.FromArgb(45, 45, 48) : SystemColors.Control;
             Color foreColor = dark ? Color.White : SystemColors.ControlText;
             Color inputBack = dark ? Color.FromArgb(30, 30, 30) : Color.White;
 
             this.BackColor = backColor;
-
             lblLine.ForeColor = foreColor;
 
             txtLine.BackColor = inputBack;
@@ -78,10 +73,17 @@ namespace DamnSimple_WindowsNotepad
 
         private void HandleGo()
         {
-            if (int.TryParse(txtLine.Text, out _))
+            if (int.TryParse(txtLine.Text, out int lineNum))
             {
-                this.DialogResult = DialogResult.OK;
-                this.Close();
+                if (lineNum > 0 && lineNum <= _editor.Lines.Length)
+                {
+                    this.DialogResult = DialogResult.OK;
+                    this.Close();
+                }
+                else
+                {
+                    MessageBox.Show($"The line number is beyond the total lines ({_editor.Lines.Length}).", "Notepad - Goto Line");
+                }
             }
             else
             {
@@ -89,7 +91,6 @@ namespace DamnSimple_WindowsNotepad
             }
         }
 
-        // Property to pass the result back to the main form
         public int LineNumber => int.TryParse(txtLine.Text, out int n) ? n : -1;
     }
 }

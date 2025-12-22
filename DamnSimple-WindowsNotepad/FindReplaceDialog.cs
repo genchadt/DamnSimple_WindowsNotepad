@@ -1,14 +1,18 @@
 ﻿using System;
 using System.Drawing;
 using System.Runtime.InteropServices;
-using System.Windows.Forms;
 using System.Text.RegularExpressions;
+using System.Windows.Forms;
 
 namespace DamnSimple_WindowsNotepad
 {
+    /// <summary>
+    /// A dialog for finding and replacing text within the RichTextBox.
+    /// Supports both plain text and Regex (if extended).
+    /// </summary>
     public class FindReplaceDialog : Form
     {
-        private readonly TextBox _editor;
+        private readonly RichTextBox _editor;
         private readonly bool _isReplaceMode;
 
         // UI Controls
@@ -22,12 +26,12 @@ namespace DamnSimple_WindowsNotepad
         private Button btnCancel = new Button { Text = "Cancel", Width = 90 };
         private CheckBox chkMatchCase = new CheckBox { Text = "Match case", AutoSize = true };
 
-        // P/Invoke for Dark Mode title bar
+        // P/Invoke for Dark Mode
         [DllImport("dwmapi.dll", PreserveSig = true)]
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
         private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
 
-        public FindReplaceDialog(TextBox editor, bool isReplaceMode, bool isDarkMode)
+        public FindReplaceDialog(RichTextBox editor, bool isReplaceMode, bool isDarkMode)
         {
             _editor = editor;
             _isReplaceMode = isReplaceMode;
@@ -39,6 +43,7 @@ namespace DamnSimple_WindowsNotepad
             this.MinimizeBox = false;
             this.ShowInTaskbar = false;
             this.StartPosition = FormStartPosition.CenterParent;
+            this.AutoScaleMode = AutoScaleMode.Font; // High DPI support
 
             SetupLayout();
             ApplyTheme(isDarkMode);
@@ -86,20 +91,22 @@ namespace DamnSimple_WindowsNotepad
             Color inputBack = dark ? Color.FromArgb(30, 30, 30) : Color.White;
 
             this.BackColor = back;
+
             foreach (Control c in this.Controls)
             {
                 c.ForeColor = fore;
+
                 if (c is TextBox t)
                 {
                     t.BackColor = inputBack;
                     t.BorderStyle = dark ? BorderStyle.FixedSingle : BorderStyle.Fixed3D;
                 }
+
                 if (c is Button b)
                 {
                     b.BackColor = dark ? Color.FromArgb(63, 63, 70) : SystemColors.ButtonFace;
                     b.FlatStyle = FlatStyle.Flat;
                 }
-                if (c is CheckBox cb) cb.ForeColor = fore;
             }
         }
 
@@ -108,17 +115,20 @@ namespace DamnSimple_WindowsNotepad
             string find = txtFind.Text;
             if (string.IsNullOrEmpty(find)) return;
 
-            StringComparison comp = chkMatchCase.Checked ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
-            int startPos = _editor.SelectionStart + _editor.SelectionLength;
-            int index = _editor.Text.IndexOf(find, startPos, comp);
+            RichTextBoxFinds options = RichTextBoxFinds.None;
+            if (chkMatchCase.Checked) options |= RichTextBoxFinds.MatchCase;
 
-            if (index == -1) index = _editor.Text.IndexOf(find, 0, comp); // Wrap around
+            // Start search from current cursor position
+            int startPos = _editor.SelectionStart + _editor.SelectionLength;
+            int index = _editor.Find(find, startPos, options);
+
+            // Wrap around if not found
+            if (index == -1) index = _editor.Find(find, 0, options);
 
             if (index != -1)
             {
-                _editor.Select(index, find.Length);
-                _editor.ScrollToCaret();
                 _editor.Focus();
+                _editor.Select(index, find.Length);
             }
             else
             {
@@ -128,6 +138,7 @@ namespace DamnSimple_WindowsNotepad
 
         private void Replace()
         {
+            // Only replace if the currently selected text matches the find query
             if (_editor.SelectedText.Equals(txtFind.Text, chkMatchCase.Checked ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase))
             {
                 _editor.SelectedText = txtReplace.Text;
