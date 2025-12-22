@@ -44,7 +44,7 @@ namespace DamnSimple_WindowsNotepad
         private void InitializeComponent()
         {
             this.components = new System.ComponentModel.Container();
-            System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(Form)); // Needed for PrintPreview icon
+            System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(Form));
 
             // Form Setup
             this.Text = "Untitled - Notepad";
@@ -68,7 +68,6 @@ namespace DamnSimple_WindowsNotepad
             fileMenu.DropDownItems.Add(new ToolStripMenuItem("&Save", null, (s, e) => FileSave()) { ShortcutKeys = Keys.Control | Keys.S });
             fileMenu.DropDownItems.Add(new ToolStripMenuItem("Save &As...", null, (s, e) => FileSaveAs()));
             fileMenu.DropDownItems.Add(new ToolStripSeparator());
-            // Print Items
             fileMenu.DropDownItems.Add(new ToolStripMenuItem("Page Set&up...", null, (s, e) => FilePageSetup()));
             fileMenu.DropDownItems.Add(new ToolStripMenuItem("Print Pre&view", null, (s, e) => FilePrintPreview()));
             fileMenu.DropDownItems.Add(new ToolStripMenuItem("&Print...", null, (s, e) => FilePrint()) { ShortcutKeys = Keys.Control | Keys.P });
@@ -145,10 +144,13 @@ namespace DamnSimple_WindowsNotepad
             printDocument = new PrintDocument();
             printDocument.BeginPrint += PrintDocument_BeginPrint;
             printDocument.PrintPage += PrintDocument_PrintPage;
+            printDocument.EndPrint += PrintDocument_EndPrint; // FIX 1: Restore colors
 
             printDialog = new PrintDialog();
             printDialog.Document = printDocument;
-            printDialog.UseEXDialog = true; // Use modern Windows print dialog
+
+            // FIX 2: Disable modern dialog to fix "Preview not supported" error
+            printDialog.UseEXDialog = false;
 
             pageSetupDialog = new PageSetupDialog();
             pageSetupDialog.Document = printDocument;
@@ -156,7 +158,6 @@ namespace DamnSimple_WindowsNotepad
             printPreviewDialog = new PrintPreviewDialog();
             printPreviewDialog.Document = printDocument;
             printPreviewDialog.StartPosition = FormStartPosition.CenterParent;
-            // Attempt to set a standard icon for preview (optional)
             try { printPreviewDialog.Icon = (Icon)resources.GetObject("$this.Icon"); } catch { }
 
             // Add Controls
@@ -166,7 +167,6 @@ namespace DamnSimple_WindowsNotepad
             this.MainMenuStrip = menuStrip;
         }
 
-        // Custom control helper with Smooth Scrolling, Theming, and PRINTING support
         private class CustomRichTextBox : RichTextBox
         {
             public Action? HandleCreatedAction { get; set; }
@@ -184,7 +184,6 @@ namespace DamnSimple_WindowsNotepad
             [DllImport("user32.dll")]
             private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, ref STRUCT_FORMATRANGE lParam);
 
-            // --- Structs for Printing ---
             [StructLayout(LayoutKind.Sequential)]
             private struct STRUCT_RECT
             {
@@ -224,14 +223,9 @@ namespace DamnSimple_WindowsNotepad
                 base.WndProc(ref m);
             }
 
-            /// <summary>
-            /// Renders the content of the RichTextBox to a Graphics object (Printer).
-            /// </summary>
             public int FormatRange(bool measureOnly, PrintPageEventArgs e, int charFrom, int charTo)
             {
-                // Convert .NET bounds (1/100 inch) to Twips (1/1440 inch)
-                // 1 inch = 1440 Twips. 100 Display Units = 1 inch.
-                // Therefore 1 Display Unit = 14.4 Twips.
+                // 1 inch = 1440 Twips. 100 Display Units = 1 inch. 
                 int w = (int)(e.MarginBounds.Width * 14.4);
                 int h = (int)(e.MarginBounds.Height * 14.4);
                 int l = (int)(e.MarginBounds.Left * 14.4);
@@ -250,7 +244,6 @@ namespace DamnSimple_WindowsNotepad
                 fmtRange.rc = rc;
                 fmtRange.rcPage = rcPage;
 
-                // Send the EM_FORMATRANGE message to the RichTextBox
                 IntPtr res = SendMessage(this.Handle, EM_FORMATRANGE, measureOnly ? IntPtr.Zero : (IntPtr)1, ref fmtRange);
 
                 e.Graphics.ReleaseHdc(hdc);

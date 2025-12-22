@@ -22,6 +22,8 @@ namespace DamnSimple_WindowsNotepad
 
         // Printing State
         private int _checkPrint;
+        private Color _storedForeColor;
+        private Color _storedBackColor;
 
         // P/Invoke for Dark Mode
         [DllImport("dwmapi.dll", PreserveSig = true)]
@@ -142,6 +144,9 @@ namespace DamnSimple_WindowsNotepad
 
         private void FilePrintPreview()
         {
+            // Center the preview dialog on the screen (optional UX improvement)
+            printPreviewDialog.Width = 800;
+            printPreviewDialog.Height = 600;
             printPreviewDialog.ShowDialog();
         }
 
@@ -155,16 +160,22 @@ namespace DamnSimple_WindowsNotepad
 
         private void PrintDocument_BeginPrint(object sender, PrintEventArgs e)
         {
-            _checkPrint = 0; // Reset character counter
+            _checkPrint = 0;
+
+            // FIX 1: Store current colors and force Black-on-White for printing.
+            // This ensures text is visible on paper/preview even if Dark Mode is active.
+            _storedForeColor = txtContent.ForeColor;
+            _storedBackColor = txtContent.BackColor;
+
+            txtContent.ForeColor = Color.Black;
+            txtContent.BackColor = Color.White;
         }
 
         private void PrintDocument_PrintPage(object sender, PrintPageEventArgs e)
         {
             // Print the content using the CustomRichTextBox's FormatRange method
-            // This renders the text inside the margins defined by PageSetup
             _checkPrint = txtContent.FormatRange(false, e, _checkPrint, txtContent.TextLength);
 
-            // If we haven't reached the end of the text, we need another page
             if (_checkPrint < txtContent.TextLength)
             {
                 e.HasMorePages = true;
@@ -172,8 +183,15 @@ namespace DamnSimple_WindowsNotepad
             else
             {
                 e.HasMorePages = false;
-                txtContent.FormatRangeDone(); // Cleanup
+                txtContent.FormatRangeDone();
             }
+        }
+
+        private void PrintDocument_EndPrint(object sender, PrintEventArgs e)
+        {
+            // FIX 1 (Cleanup): Restore the original Dark Mode (or Light Mode) colors
+            txtContent.ForeColor = _storedForeColor;
+            txtContent.BackColor = _storedBackColor;
         }
 
         #endregion
