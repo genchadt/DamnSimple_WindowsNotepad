@@ -49,7 +49,8 @@ namespace DamnSimple_WindowsNotepad
             // Form Setup
             this.Text = "Untitled - Notepad";
             this.Size = new Size(900, 600);
-            this.Icon = SystemIcons.Application;
+            // this.Icon = SystemIcons.Application;
+            this.Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.AutoScaleMode = AutoScaleMode.Font;
             this.AllowDrop = true;
