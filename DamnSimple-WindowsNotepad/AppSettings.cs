@@ -18,14 +18,59 @@ namespace DamnSimple_WindowsNotepad
         public bool WordWrap { get; set; } = true;
         public bool StatusBarVisible { get; set; } = true;
         public bool SmoothScrolling { get; set; } = true;
+        public bool DarkMode { get; set; } = false;
+
+        // NEW: Syntax Highlighting Persistence
+        public bool SyntaxHighlighting { get; set; } = true;
 
         // Font Settings
         public string FontFamily { get; set; } = "Consolas";
         public float FontSize { get; set; } = 11f;
         public int FontStyle { get; set; } = (int)System.Drawing.FontStyle.Regular;
 
+        // --- Helper Properties for Form Compatibility ---
+
+        [XmlIgnore]
+        public Point Location
+        {
+            get => new Point(WindowX, WindowY);
+            set { WindowX = value.X; WindowY = value.Y; }
+        }
+
+        [XmlIgnore]
+        public Size Size
+        {
+            get => new Size(WindowWidth, WindowHeight);
+            set { WindowWidth = value.Width; WindowHeight = value.Height; }
+        }
+
+        [XmlIgnore]
+        public bool StatusBar
+        {
+            get => StatusBarVisible;
+            set => StatusBarVisible = value;
+        }
+
+        [XmlIgnore]
+        public Font Font
+        {
+            get
+            {
+                try { return new Font(FontFamily, FontSize, (FontStyle)FontStyle); }
+                catch { return new Font("Consolas", 11f); }
+            }
+            set
+            {
+                if (value != null)
+                {
+                    FontFamily = value.Name;
+                    FontSize = value.Size;
+                    FontStyle = (int)value.Style;
+                }
+            }
+        }
+
         // --- Logic ---
-        // We use XML now so you don't need System.Text.Json
         private static string SettingsPath => Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "settings.xml");
 
         public static AppSettings Load()
@@ -43,7 +88,7 @@ namespace DamnSimple_WindowsNotepad
             }
             catch
             {
-                // Verify write permissions or handle corrupt XML silently by falling back to defaults
+                // Fallback to defaults
             }
             return new AppSettings();
         }

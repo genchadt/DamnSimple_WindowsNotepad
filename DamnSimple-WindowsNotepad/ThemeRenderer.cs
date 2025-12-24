@@ -14,6 +14,7 @@ namespace DamnSimple_WindowsNotepad
         {
             if (e.Item.Selected)
             {
+                // Custom selection background
                 Rectangle rc = new Rectangle(Point.Empty, e.Item.Size);
                 using (SolidBrush brush = new SolidBrush(Color.FromArgb(60, 60, 60)))
                 {
@@ -28,6 +29,29 @@ namespace DamnSimple_WindowsNotepad
             {
                 base.OnRenderMenuItemBackground(e);
             }
+        }
+
+        protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
+        {
+            // FIX: Force text color to White in Dark Mode
+            // Dropdown items don't always inherit ForeColor correctly, so we enforce it here.
+            if (e.Item.Enabled)
+            {
+                e.TextColor = Color.White;
+            }
+            else
+            {
+                e.TextColor = Color.Gray;
+            }
+
+            base.OnRenderItemText(e);
+        }
+
+        protected override void OnRenderArrow(ToolStripArrowRenderEventArgs e)
+        {
+            // Force arrows to be white (or gray if disabled)
+            e.ArrowColor = e.Item.Enabled ? Color.White : Color.Gray;
+            base.OnRenderArrow(e);
         }
     }
 

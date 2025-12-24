@@ -13,7 +13,8 @@ namespace DamnSimple_WindowsNotepad
     public class FindReplaceDialog : Form
     {
         private readonly RichTextBox _editor;
-        private readonly bool _isReplaceMode;
+        private bool _isReplaceMode;
+        private bool _isDarkMode;
 
         // UI Controls
         private Label lblFind = new Label { Text = "Find what:", AutoSize = true };
@@ -35,9 +36,8 @@ namespace DamnSimple_WindowsNotepad
         {
             _editor = editor;
             _isReplaceMode = isReplaceMode;
+            _isDarkMode = isDarkMode;
 
-            this.Text = isReplaceMode ? "Replace" : "Find";
-            this.Size = new Size(410, isReplaceMode ? 210 : 160);
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.MaximizeBox = false;
             this.MinimizeBox = false;
@@ -45,32 +45,55 @@ namespace DamnSimple_WindowsNotepad
             this.StartPosition = FormStartPosition.CenterParent;
             this.AutoScaleMode = AutoScaleMode.Font; // High DPI support
 
-            SetupLayout();
-            ApplyTheme(isDarkMode);
-            WireEvents();
-        }
-
-        private void SetupLayout()
-        {
+            // Controls Init
             lblFind.Location = new Point(10, 15);
             txtFind.Location = new Point(100, 12);
             btnFindNext.Location = new Point(295, 10);
             btnCancel.Location = new Point(295, 40);
-            chkMatchCase.Location = new Point(10, _isReplaceMode ? 140 : 90);
 
-            this.Controls.AddRange(new Control[] { lblFind, txtFind, btnFindNext, btnCancel, chkMatchCase });
+            lblReplace.Location = new Point(10, 45);
+            txtReplace.Location = new Point(100, 42);
+            btnReplace.Location = new Point(295, 75);
+            btnReplaceAll.Location = new Point(295, 105);
 
-            if (_isReplaceMode)
-            {
-                lblReplace.Location = new Point(10, 45);
-                txtReplace.Location = new Point(100, 42);
-                btnReplace.Location = new Point(295, 75);
-                btnReplaceAll.Location = new Point(295, 105);
-                this.Controls.AddRange(new Control[] { lblReplace, txtReplace, btnReplace, btnReplaceAll });
-            }
+            this.Controls.AddRange(new Control[] { lblFind, txtFind, btnFindNext, btnCancel, chkMatchCase, lblReplace, txtReplace, btnReplace, btnReplaceAll });
 
             this.AcceptButton = btnFindNext;
             this.CancelButton = btnCancel;
+
+            WireEvents();
+            ApplyMode();
+            ApplyTheme(_isDarkMode);
+        }
+
+        public void SetMode(bool isReplaceMode)
+        {
+            if (_isReplaceMode != isReplaceMode)
+            {
+                _isReplaceMode = isReplaceMode;
+                ApplyMode();
+            }
+        }
+
+        public void UpdateTheme(bool isDark)
+        {
+            _isDarkMode = isDark;
+            ApplyTheme(_isDarkMode);
+        }
+
+        private void ApplyMode()
+        {
+            this.Text = _isReplaceMode ? "Replace" : "Find";
+            this.Size = new Size(410, _isReplaceMode ? 210 : 160);
+
+            // Visibility
+            lblReplace.Visible = _isReplaceMode;
+            txtReplace.Visible = _isReplaceMode;
+            btnReplace.Visible = _isReplaceMode;
+            btnReplaceAll.Visible = _isReplaceMode;
+
+            // Adjust Checkbox location based on mode
+            chkMatchCase.Location = new Point(10, _isReplaceMode ? 140 : 90);
         }
 
         private void WireEvents()
@@ -84,7 +107,11 @@ namespace DamnSimple_WindowsNotepad
         private void ApplyTheme(bool dark)
         {
             int useDark = dark ? 1 : 0;
-            DwmSetWindowAttribute(this.Handle, DWMWA_USE_IMMERSIVE_DARK_MODE, ref useDark, sizeof(int));
+            try
+            {
+                DwmSetWindowAttribute(this.Handle, DWMWA_USE_IMMERSIVE_DARK_MODE, ref useDark, sizeof(int));
+            }
+            catch { /* Ignore */ }
 
             Color back = dark ? Color.FromArgb(45, 45, 48) : SystemColors.Control;
             Color fore = dark ? Color.White : SystemColors.ControlText;
@@ -108,6 +135,8 @@ namespace DamnSimple_WindowsNotepad
                     b.FlatStyle = FlatStyle.Flat;
                 }
             }
+
+            this.Invalidate();
         }
 
         private void FindNext()

@@ -6,147 +6,280 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows.Forms;
-using Microsoft.Win32;
 
 namespace DamnSimple_WindowsNotepad
 {
     public partial class NotepadForm : Form
     {
-        #region Fields
-
-        private string? _currentFilePath = null;
+        private string? _filePath = null;
         private bool _isDirty = false;
-        private Encoding _currentEncoding = Encoding.UTF8;
-        private AppSettings _settings;
-        private FindReplaceDialog? _findDialog = null;
+        private bool _isDarkMode = false;
+        private FindReplaceDialog? _findReplaceDialog;
+        private GoToDialog? _goToDialog;
+        private int _lastPrintChar = 0;
 
-        // Printing State
-        private int _checkPrint;
-        private Color _storedForeColor;
-        private Color _storedBackColor;
-
-        // P/Invoke for Dark Mode
+        // P/Invoke for Immersive Dark Mode on Title Bar
         [DllImport("dwmapi.dll", PreserveSig = true)]
-        public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
+        private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
         private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
 
-        [DllImport("uxtheme.dll", ExactSpelling = true, CharSet = CharSet.Unicode)]
-        private static extern int SetWindowTheme(IntPtr hWnd, string pszSubAppName, string? pszSubIdList);
+        // Added Dark Mode Menu Item
+        private ToolStripMenuItem darkModeItem;
+        // Added Syntax Highlighting Menu Item
+        private ToolStripMenuItem syntaxHighlightItem;
 
-        #endregion
-
-        #region Constructor & Initialization
-
-        public NotepadForm()
+        public NotepadForm(string? filePath = null)
         {
-            _settings = AppSettings.Load();
             InitializeComponent();
-            ApplySettings();
-            ApplyTheme();
 
-            SystemEvents.UserPreferenceChanged += (s, e) =>
+            // Form Setup
+            this.Text = "Untitled - Notepad";
+            this.Size = new Size(900, 600);
+            this.Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+            this.StartPosition = FormStartPosition.CenterScreen;
+            this.AutoScaleMode = AutoScaleMode.Font;
+            this.AllowDrop = true;
+
+            this.FormClosing += NotepadForm_FormClosing;
+            this.DragEnter += NotepadForm_DragEnter;
+            this.DragDrop += NotepadForm_DragDrop;
+
+            // --- Menu Construction ---
+            menuStrip = new MenuStrip();
+
+            // File Menu
+            var fileMenu = new ToolStripMenuItem("&File");
+            fileMenu.DropDownItems.Add(new ToolStripMenuItem("&New", null, (s, e) => FileNew()) { ShortcutKeys = Keys.Control | Keys.N });
+            fileMenu.DropDownItems.Add(new ToolStripMenuItem("&Open...", null, (s, e) => FileOpen()) { ShortcutKeys = Keys.Control | Keys.O });
+            fileMenu.DropDownItems.Add(new ToolStripMenuItem("&Save", null, (s, e) => FileSave()) { ShortcutKeys = Keys.Control | Keys.S });
+            fileMenu.DropDownItems.Add(new ToolStripMenuItem("Save &As...", null, (s, e) => FileSaveAs()));
+            fileMenu.DropDownItems.Add(new ToolStripSeparator());
+            fileMenu.DropDownItems.Add(new ToolStripMenuItem("Page Set&up...", null, (s, e) => FilePageSetup()));
+            fileMenu.DropDownItems.Add(new ToolStripMenuItem("Print Pre&view", null, (s, e) => FilePrintPreview()));
+            fileMenu.DropDownItems.Add(new ToolStripMenuItem("&Print...", null, (s, e) => FilePrint()) { ShortcutKeys = Keys.Control | Keys.P });
+            fileMenu.DropDownItems.Add(new ToolStripSeparator());
+            fileMenu.DropDownItems.Add(new ToolStripMenuItem("E&xit", null, (s, e) => Close()));
+
+            // Edit Menu
+            var editMenu = new ToolStripMenuItem("&Edit");
+            editMenu.DropDownItems.Add(new ToolStripMenuItem("&Undo", null, (s, e) => txtContent.Undo()) { ShortcutKeys = Keys.Control | Keys.Z });
+            editMenu.DropDownItems.Add(new ToolStripSeparator());
+            editMenu.DropDownItems.Add(new ToolStripMenuItem("Cu&t", null, (s, e) => txtContent.Cut()) { ShortcutKeys = Keys.Control | Keys.X });
+            editMenu.DropDownItems.Add(new ToolStripMenuItem("&Copy", null, (s, e) => txtContent.Copy()) { ShortcutKeys = Keys.Control | Keys.C });
+            editMenu.DropDownItems.Add(new ToolStripMenuItem("&Paste", null, (s, e) => txtContent.Paste()) { ShortcutKeys = Keys.Control | Keys.V });
+            editMenu.DropDownItems.Add(new ToolStripSeparator());
+            editMenu.DropDownItems.Add(new ToolStripMenuItem("&Find...", null, (s, e) => ShowFindReplace(false)) { ShortcutKeys = Keys.Control | Keys.F });
+            editMenu.DropDownItems.Add(new ToolStripMenuItem("&Replace...", null, (s, e) => ShowFindReplace(true)) { ShortcutKeys = Keys.Control | Keys.H });
+            editMenu.DropDownItems.Add(new ToolStripMenuItem("Go &To...", null, (s, e) => ShowGoTo()) { ShortcutKeys = Keys.Control | Keys.G });
+            editMenu.DropDownItems.Add(new ToolStripSeparator());
+            editMenu.DropDownItems.Add(new ToolStripMenuItem("Select &All", null, (s, e) => txtContent.SelectAll()) { ShortcutKeys = Keys.Control | Keys.A });
+            editMenu.DropDownItems.Add(new ToolStripMenuItem("Time/&Date", null, (s, e) => txtContent.AppendText(DateTime.Now.ToString())) { ShortcutKeys = Keys.F5 });
+
+            // Format Menu
+            var formatMenu = new ToolStripMenuItem("&Format");
+            wordWrapItem = new ToolStripMenuItem("&Word Wrap", null, (s, e) => ToggleWordWrap()) { CheckOnClick = true };
+            formatMenu.DropDownItems.Add(wordWrapItem);
+            formatMenu.DropDownItems.Add(new ToolStripMenuItem("&Font...", null, (s, e) => ChangeFont()));
+
+            // View Menu
+            var viewMenu = new ToolStripMenuItem("&View");
+            statusItem = new ToolStripMenuItem("&Status Bar", null, (s, e) => ToggleStatusBar()) { CheckOnClick = true };
+            smoothScrollItem = new ToolStripMenuItem("Smooth &Scrolling", null, (s, e) => ToggleSmoothScroll()) { CheckOnClick = true };
+            // NEW: Syntax Highlighting Menu Item
+            syntaxHighlightItem = new ToolStripMenuItem("Syntax &Highlighting", null, (s, e) => ToggleSyntaxHighlighting()) { CheckOnClick = true };
+            darkModeItem = new ToolStripMenuItem("&Dark Mode", null, (s, e) => ToggleDarkMode()) { CheckOnClick = true };
+
+            var zoomMenu = new ToolStripMenuItem("&Zoom");
+            zoomMenu.DropDownItems.Add(new ToolStripMenuItem("Zoom &In", null, (s, e) => Zoom(0.1f)) { ShortcutKeys = Keys.Control | Keys.Oemplus });
+            zoomMenu.DropDownItems.Add(new ToolStripMenuItem("Zoom &Out", null, (s, e) => Zoom(-0.1f)) { ShortcutKeys = Keys.Control | Keys.OemMinus });
+            zoomMenu.DropDownItems.Add(new ToolStripMenuItem("&Restore Default Zoom", null, (s, e) => { txtContent.ZoomFactor = 1.0f; UpdateStatusBar(); }) { ShortcutKeys = Keys.Control | Keys.D0 });
+
+            viewMenu.DropDownItems.Add(zoomMenu);
+            viewMenu.DropDownItems.Add(statusItem);
+            viewMenu.DropDownItems.Add(smoothScrollItem);
+            viewMenu.DropDownItems.Add(syntaxHighlightItem);
+            viewMenu.DropDownItems.Add(new ToolStripSeparator());
+            viewMenu.DropDownItems.Add(darkModeItem);
+
+            // Help Menu
+            var helpMenu = new ToolStripMenuItem("&Help");
+            helpMenu.DropDownItems.Add(new ToolStripMenuItem("&About", null, (s, e) => ShowAbout()));
+
+            menuStrip.Items.AddRange(new ToolStripItem[] { fileMenu, editMenu, formatMenu, viewMenu, helpMenu });
+
+            // --- Editor ---
+            txtContent = new CustomRichTextBox();
+            txtContent.Multiline = true;
+            txtContent.Dock = DockStyle.Fill;
+            txtContent.ScrollBars = RichTextBoxScrollBars.Vertical;
+            txtContent.Font = new Font("Consolas", 11f);
+            txtContent.BorderStyle = BorderStyle.None;
+            txtContent.AcceptsTab = true;
+
+            // Editor Events
+            txtContent.TextChanged += OnContentChanged;
+            txtContent.SelectionChanged += OnSelectionChanged;
+            txtContent.HandleCreatedAction = () => ApplyTheme();
+            txtContent.MouseWheel += OnEditorMouseWheel;
+
+            // --- Status Strip ---
+            statusStrip = new StatusStrip();
+            lblCursorPos = new ToolStripStatusLabel { Text = "  Ln 1, Col 1", AutoSize = false, Width = 150, TextAlign = ContentAlignment.MiddleLeft };
+            lblZoom = new ToolStripStatusLabel { Text = "100%", AutoSize = false, Width = 60 };
+            lblEncoding = new ToolStripStatusLabel { Text = "UTF-8", AutoSize = false, Width = 100 };
+            var spring = new ToolStripStatusLabel { Spring = true };
+
+            statusStrip.Items.AddRange(new ToolStripItem[] { lblCursorPos, spring, lblZoom, lblEncoding });
+            statusStrip.Visible = true;
+
+            // --- Printing Initialization ---
+            printDocument = new PrintDocument();
+            printDocument.BeginPrint += PrintDocument_BeginPrint;
+            printDocument.PrintPage += PrintDocument_PrintPage;
+            printDocument.EndPrint += PrintDocument_EndPrint;
+
+            printDialog = new PrintDialog();
+            printDialog.Document = printDocument;
+            printDialog.UseEXDialog = false;
+
+            pageSetupDialog = new PageSetupDialog();
+            pageSetupDialog.Document = printDocument;
+
+            printPreviewDialog = new PrintPreviewDialog();
+            printPreviewDialog.Document = printDocument;
+            printPreviewDialog.StartPosition = FormStartPosition.CenterParent;
+            try
             {
-                if (e.Category == UserPreferenceCategory.General) ApplyTheme();
-            };
+                System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(NotepadForm));
+                var iconObj = resources.GetObject("$this.Icon");
+                if (iconObj is Icon icon)
+                {
+                    printPreviewDialog.Icon = icon;
+                }
+            }
+            catch { }
+
+            // Add Controls
+            this.Controls.Add(txtContent);
+            this.Controls.Add(statusStrip);
+            this.Controls.Add(menuStrip);
+            this.MainMenuStrip = menuStrip;
+
+            // Final setup
+            LoadSettings();
+
+            if (filePath != null)
+            {
+                OpenFile(filePath);
+            }
         }
 
-        private void ApplySettings()
+        private void OnEditorMouseWheel(object? sender, MouseEventArgs e)
         {
-            if (_settings.IsWindowVisible())
-            {
-                this.StartPosition = FormStartPosition.Manual;
-                this.Location = new Point(_settings.WindowX, _settings.WindowY);
-                this.Size = new Size(_settings.WindowWidth, _settings.WindowHeight);
-            }
+            if (Control.ModifierKeys == Keys.Control) UpdateStatusBar();
+        }
 
-            if (_settings.IsMaximized) this.WindowState = FormWindowState.Maximized;
-
-            try { txtContent.Font = new Font(_settings.FontFamily, _settings.FontSize, (FontStyle)_settings.FontStyle); }
-            catch { txtContent.Font = new Font("Consolas", 11f); }
-
-            txtContent.WordWrap = _settings.WordWrap;
-            txtContent.EnableSmoothScrolling = _settings.SmoothScrolling;
-            statusStrip.Visible = _settings.StatusBarVisible;
-
-            wordWrapItem.Checked = _settings.WordWrap;
-            smoothScrollItem.Checked = _settings.SmoothScrolling;
-            statusItem.Checked = _settings.StatusBarVisible;
-
+        private void OnSelectionChanged(object? sender, EventArgs e)
+        {
             UpdateStatusBar();
         }
 
-        #endregion
+        private void OnContentChanged(object? sender, EventArgs e)
+        {
+            SetDirty(true);
+            UpdateStatusBar();
+        }
 
-        #region File Operations
+        private void SetDirty(bool dirty)
+        {
+            if (_isDirty == dirty) return;
+            _isDirty = dirty;
+            this.Text = this.Text.EndsWith("*") ? this.Text.Substring(0, this.Text.Length - 1) : this.Text + "*";
+        }
+
+        private void UpdateStatusBar()
+        {
+            // Cursor Position
+            int line = txtContent.GetLineFromCharIndex(txtContent.SelectionStart) + 1;
+            int col = txtContent.SelectionStart - txtContent.GetFirstCharIndexOfCurrentLine() + 1;
+            lblCursorPos.Text = $"  Ln {line}, Col {col}";
+
+            // Zoom
+            lblZoom.Text = $"{txtContent.ZoomFactor * 100:F0}%";
+        }
 
         private void FileNew()
         {
-            if (ConfirmSave()) { txtContent.Clear(); _currentFilePath = null; _currentEncoding = Encoding.UTF8; SetDirty(false); UpdateTitle(); UpdateStatusBar(); }
+            if (CheckDirty())
+            {
+                txtContent.Text = string.Empty;
+                _filePath = null;
+                txtContent.CurrentSyntaxMode = SyntaxMode.None; // Reset syntax
+                this.Text = "Untitled - Notepad";
+                SetDirty(false);
+            }
         }
 
         private void FileOpen()
         {
-            if (!ConfirmSave()) return;
-            using var ofd = new OpenFileDialog { Filter = "Text Documents (*.txt)|*.txt|All Files (*.*)|*.*", Title = "Open" };
-            if (ofd.ShowDialog() == DialogResult.OK) LoadFile(ofd.FileName);
-        }
-
-        private void LoadFile(string path)
-        {
-            try
+            if (CheckDirty())
             {
-                using (var reader = new StreamReader(path, true))
+                using (var ofd = new OpenFileDialog())
                 {
-                    txtContent.Text = reader.ReadToEnd();
-                    _currentEncoding = reader.CurrentEncoding;
+                    ofd.Filter = "Text Files (*.txt)|*.txt|All Files (*.*)|*.*";
+                    if (ofd.ShowDialog() == DialogResult.OK)
+                    {
+                        OpenFile(ofd.FileName);
+                    }
                 }
-                _currentFilePath = path; SetDirty(false); UpdateTitle(); UpdateStatusBar();
-                txtContent.SelectionStart = 0; txtContent.ScrollToCaret();
             }
-            catch (Exception ex) { MessageBox.Show($"Error: {ex.Message}", "Notepad", MessageBoxButtons.OK, MessageBoxIcon.Error); }
         }
 
-        private void FileSave() { if (string.IsNullOrEmpty(_currentFilePath)) FileSaveAs(); else SaveFile(_currentFilePath); }
+        private void FileSave()
+        {
+            if (_filePath == null)
+            {
+                FileSaveAs();
+            }
+            else
+            {
+                try
+                {
+                    File.WriteAllText(_filePath, txtContent.Text, Encoding.UTF8);
+                    SetDirty(false);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Error saving file: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+        }
 
         private void FileSaveAs()
         {
-            using var sfd = new SaveFileDialog { Filter = "Text Documents (*.txt)|*.txt|All Files (*.*)|*.*", Title = "Save As" };
-            if (sfd.ShowDialog() == DialogResult.OK) SaveFile(sfd.FileName);
+            using (var sfd = new SaveFileDialog())
+            {
+                sfd.Filter = "Text Files (*.txt)|*.txt|All Files (*.*)|*.*";
+                if (sfd.ShowDialog() == DialogResult.OK)
+                {
+                    _filePath = sfd.FileName;
+                    this.Text = Path.GetFileName(_filePath) + " - Notepad";
+                    FileSave();
+
+                    // Re-evaluate syntax mode based on new extension
+                    OpenFile(_filePath);
+                }
+            }
         }
-
-        private void SaveFile(string path)
-        {
-            try { File.WriteAllText(path, txtContent.Text, _currentEncoding); _currentFilePath = path; SetDirty(false); UpdateTitle(); }
-            catch (Exception ex) { MessageBox.Show($"Error: {ex.Message}", "Notepad", MessageBoxButtons.OK, MessageBoxIcon.Error); }
-        }
-
-        private bool ConfirmSave()
-        {
-            if (!_isDirty) return true;
-            string fileName = string.IsNullOrEmpty(_currentFilePath) ? "Untitled" : Path.GetFileName(_currentFilePath);
-            var res = MessageBox.Show($"Save changes to {fileName}?", "Notepad", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
-            if (res == DialogResult.Yes) { FileSave(); return !_isDirty; }
-            return res == DialogResult.No;
-        }
-
-        #endregion
-
-        #region Printing Logic
 
         private void FilePageSetup()
         {
-            pageSetupDialog.PageSettings = printDocument.DefaultPageSettings;
-            if (pageSetupDialog.ShowDialog() == DialogResult.OK)
-            {
-                printDocument.DefaultPageSettings = pageSetupDialog.PageSettings;
-            }
+            pageSetupDialog.ShowDialog();
         }
 
         private void FilePrintPreview()
         {
-            // Center the preview dialog on the screen (optional UX improvement)
-            printPreviewDialog.Width = 800;
-            printPreviewDialog.Height = 600;
+            _lastPrintChar = 0;
             printPreviewDialog.ShowDialog();
         }
 
@@ -154,166 +287,301 @@ namespace DamnSimple_WindowsNotepad
         {
             if (printDialog.ShowDialog() == DialogResult.OK)
             {
+                _lastPrintChar = 0;
                 printDocument.Print();
             }
         }
 
-        private void PrintDocument_BeginPrint(object sender, PrintEventArgs e)
+        private void PrintDocument_BeginPrint(object? sender, PrintEventArgs e)
         {
-            _checkPrint = 0;
-
-            // FIX 1: Store current colors and force Black-on-White for printing.
-            // This ensures text is visible on paper/preview even if Dark Mode is active.
-            _storedForeColor = txtContent.ForeColor;
-            _storedBackColor = txtContent.BackColor;
-
-            txtContent.ForeColor = Color.Black;
-            txtContent.BackColor = Color.White;
+            _lastPrintChar = 0;
         }
 
-        private void PrintDocument_PrintPage(object sender, PrintPageEventArgs e)
+        private void PrintDocument_PrintPage(object? sender, PrintPageEventArgs e)
         {
-            // Print the content using the CustomRichTextBox's FormatRange method
-            _checkPrint = txtContent.FormatRange(false, e, _checkPrint, txtContent.TextLength);
+            _lastPrintChar = txtContent.FormatRange(false, e, _lastPrintChar, txtContent.TextLength);
+            e.HasMorePages = (_lastPrintChar < txtContent.TextLength);
+        }
 
-            if (_checkPrint < txtContent.TextLength)
+        private void PrintDocument_EndPrint(object? sender, PrintEventArgs e)
+        {
+            txtContent.FormatRangeDone();
+        }
+
+        private void ChangeFont()
+        {
+            using (var fd = new FontDialog())
             {
-                e.HasMorePages = true;
-            }
-            else
-            {
-                e.HasMorePages = false;
-                txtContent.FormatRangeDone();
-            }
-        }
-
-        private void PrintDocument_EndPrint(object sender, PrintEventArgs e)
-        {
-            // FIX 1 (Cleanup): Restore the original Dark Mode (or Light Mode) colors
-            txtContent.ForeColor = _storedForeColor;
-            txtContent.BackColor = _storedBackColor;
-        }
-
-        #endregion
-
-        #region Editor Logic
-
-        private void Zoom(float delta)
-        {
-            float newZoom = txtContent.ZoomFactor + delta;
-            if (newZoom >= 0.1f && newZoom <= 5.0f) { txtContent.ZoomFactor = newZoom; UpdateStatusBar(); }
-        }
-
-        private void ShowFindReplace(bool isReplace)
-        {
-            if (_findDialog != null && !_findDialog.IsDisposed) { _findDialog.BringToFront(); return; }
-            _findDialog = new FindReplaceDialog(txtContent, isReplace, IsDarkMode());
-            _findDialog.Show(this);
-        }
-
-        private void ShowGoTo()
-        {
-            using var dialog = new GoToDialog(txtContent, IsDarkMode());
-            if (dialog.ShowDialog() == DialogResult.OK)
-            {
-                int lineNum = dialog.LineNumber;
-                if (lineNum > 0 && lineNum <= txtContent.Lines.Length)
+                fd.Font = txtContent.Font;
+                if (fd.ShowDialog() == DialogResult.OK)
                 {
-                    int index = txtContent.GetFirstCharIndexFromLine(lineNum - 1);
-                    txtContent.Select(index, 0); txtContent.ScrollToCaret();
+                    txtContent.Font = fd.Font;
                 }
             }
         }
 
-        private void ShowAbout() { using var about = new AboutDialog(IsDarkMode()); about.ShowDialog(); }
-
-        private void ChangeFont()
+        private void ToggleWordWrap()
         {
-            using var fd = new FontDialog { Font = txtContent.Font, ShowEffects = false };
-            if (fd.ShowDialog() == DialogResult.OK) txtContent.Font = fd.Font;
+            txtContent.WordWrap = wordWrapItem.Checked;
         }
 
-        private void ToggleWordWrap() { txtContent.WordWrap = !txtContent.WordWrap; wordWrapItem.Checked = txtContent.WordWrap; UpdateStatusBar(); }
-        private void ToggleSmoothScroll() { txtContent.EnableSmoothScrolling = !txtContent.EnableSmoothScrolling; smoothScrollItem.Checked = txtContent.EnableSmoothScrolling; }
-        private void ToggleStatusBar() { statusStrip.Visible = !statusStrip.Visible; statusItem.Checked = statusStrip.Visible; UpdateStatusBar(); }
-
-        #endregion
-
-        #region UI Updates & Theming
-
-        private void SetDirty(bool dirty) { if (_isDirty != dirty) { _isDirty = dirty; UpdateTitle(); } }
-
-        private void UpdateTitle()
+        private void ToggleStatusBar()
         {
-            string fileName = string.IsNullOrEmpty(_currentFilePath) ? "Untitled" : Path.GetFileName(_currentFilePath);
-            this.Text = $"{(_isDirty ? "*" : "")}{fileName} - Notepad";
+            statusStrip.Visible = statusItem.Checked;
         }
 
-        private void UpdateStatusBar()
+        private void ToggleSmoothScroll()
         {
-            if (!statusStrip.Visible) return;
-            int index = txtContent.SelectionStart;
-            int line = txtContent.GetLineFromCharIndex(index);
-            int column = index - txtContent.GetFirstCharIndexFromLine(line);
-            lblCursorPos.Text = $"  Ln {line + 1}, Col {column + 1}";
-            lblZoom.Text = $"{(int)(txtContent.ZoomFactor * 100)}%";
-            lblEncoding.Text = _currentEncoding.BodyName.ToUpper();
+            txtContent.EnableSmoothScrolling = smoothScrollItem.Checked;
         }
 
-        public bool IsDarkMode()
+        private void ToggleSyntaxHighlighting()
+        {
+            txtContent.EnableSyntaxHighlighting = syntaxHighlightItem.Checked;
+        }
+
+        private void ToggleDarkMode()
+        {
+            _isDarkMode = darkModeItem.Checked;
+            ApplyTheme();
+
+            if (_findReplaceDialog != null && !_findReplaceDialog.IsDisposed)
+            {
+                _findReplaceDialog.UpdateTheme(_isDarkMode);
+            }
+        }
+
+        private void Zoom(float delta)
+        {
+            float newZoom = txtContent.ZoomFactor + delta;
+            if (newZoom >= 0.1f && newZoom <= 5.0f)
+            {
+                txtContent.ZoomFactor = newZoom;
+                UpdateStatusBar();
+            }
+        }
+
+        private void ShowFindReplace(bool showReplace)
+        {
+            if (_findReplaceDialog == null || _findReplaceDialog.IsDisposed)
+            {
+                _findReplaceDialog = new FindReplaceDialog(txtContent, showReplace, _isDarkMode);
+            }
+            else
+            {
+                _findReplaceDialog.SetMode(showReplace);
+            }
+
+            if (!_findReplaceDialog.Visible)
+            {
+                _findReplaceDialog.Show(this);
+            }
+            _findReplaceDialog.Focus();
+        }
+
+        private void ShowGoTo()
+        {
+            if (_goToDialog == null || _goToDialog.IsDisposed)
+            {
+                _goToDialog = new GoToDialog(txtContent, _isDarkMode);
+            }
+            _goToDialog.ShowDialog(this);
+        }
+
+        private void ShowAbout()
+        {
+            using (var about = new AboutDialog(_isDarkMode))
+            {
+                about.ShowDialog(this);
+            }
+        }
+
+        private void NotepadForm_FormClosing(object? sender, FormClosingEventArgs e)
+        {
+            if (!CheckDirty())
+            {
+                e.Cancel = true;
+            }
+            else
+            {
+                SaveSettings();
+            }
+        }
+
+        private void NotepadForm_DragEnter(object? sender, DragEventArgs e)
+        {
+            if (e.Data != null && e.Data.GetDataPresent(DataFormats.FileDrop))
+            {
+                e.Effect = DragDropEffects.Copy;
+            }
+        }
+
+        private void NotepadForm_DragDrop(object? sender, DragEventArgs e)
+        {
+            if (e.Data != null && e.Data.GetDataPresent(DataFormats.FileDrop))
+            {
+                string[]? files = e.Data.GetData(DataFormats.FileDrop) as string[];
+                if (files != null && files.Length > 0)
+                {
+                    OpenFile(files[0]);
+                }
+            }
+        }
+
+        private bool CheckDirty()
+        {
+            if (_isDirty)
+            {
+                var result = MessageBox.Show(
+                    $"Do you want to save changes to {(_filePath ?? "Untitled")}?",
+                    "Notepad",
+                    MessageBoxButtons.YesNoCancel,
+                    MessageBoxIcon.Warning);
+
+                if (result == DialogResult.Yes)
+                {
+                    FileSave();
+                    return !_isDirty;
+                }
+                else if (result == DialogResult.Cancel)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        private void OpenFile(string path)
         {
             try
             {
-                using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
-                return (key?.GetValue("AppsUseLightTheme") as int?) == 0;
+                txtContent.Text = File.ReadAllText(path, Encoding.UTF8);
+                _filePath = path;
+                this.Text = Path.GetFileName(path) + " - Notepad";
+
+                // FIX: Use null coalescing (??) to handle cases where GetExtension returns null
+                string ext = Path.GetExtension(path)?.ToLower() ?? string.Empty;
+
+                if (ext == ".log")
+                {
+                    txtContent.CurrentSyntaxMode = SyntaxMode.Logs;
+                }
+                else if (ext == ".ini" || ext == ".json" || ext == ".xml" || ext == ".config")
+                {
+                    txtContent.CurrentSyntaxMode = SyntaxMode.Config;
+                }
+                else
+                {
+                    txtContent.CurrentSyntaxMode = SyntaxMode.None;
+                }
+
+                SetDirty(false);
+                UpdateStatusBar();
             }
-            catch { return false; }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error opening file: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void LoadSettings()
+        {
+            var settings = AppSettings.Load();
+            this.WindowState = settings.IsMaximized ? FormWindowState.Maximized : FormWindowState.Normal;
+            if (this.WindowState == FormWindowState.Normal)
+            {
+                this.Location = settings.Location;
+                this.Size = settings.Size;
+            }
+
+            wordWrapItem.Checked = settings.WordWrap;
+            ToggleWordWrap();
+
+            statusItem.Checked = settings.StatusBar;
+            ToggleStatusBar();
+
+            smoothScrollItem.Checked = settings.SmoothScrolling;
+            ToggleSmoothScroll();
+
+            // Load Syntax Highlighting Setting
+            syntaxHighlightItem.Checked = settings.SyntaxHighlighting;
+            ToggleSyntaxHighlighting();
+
+            darkModeItem.Checked = settings.DarkMode;
+            ToggleDarkMode();
+
+            if (settings.Font != null)
+            {
+                txtContent.Font = settings.Font;
+            }
+        }
+
+        private void SaveSettings()
+        {
+            var settings = new AppSettings
+            {
+                IsMaximized = this.WindowState == FormWindowState.Maximized,
+                Location = this.Location,
+                Size = this.Size,
+                WordWrap = wordWrapItem.Checked,
+                StatusBar = statusItem.Checked,
+                SmoothScrolling = smoothScrollItem.Checked,
+                DarkMode = darkModeItem.Checked,
+                SyntaxHighlighting = syntaxHighlightItem.Checked, // Save Setting
+                Font = txtContent.Font
+            };
+            settings.Save();
         }
 
         private void ApplyTheme()
         {
-            bool dark = IsDarkMode();
-            int useDark = dark ? 1 : 0;
-            if (this.IsHandleCreated) DwmSetWindowAttribute(this.Handle, DWMWA_USE_IMMERSIVE_DARK_MODE, ref useDark, sizeof(int));
-            if (txtContent.IsHandleCreated) SetWindowTheme(txtContent.Handle, dark ? "DarkMode_Explorer" : "Explorer", null);
+            int useDark = _isDarkMode ? 1 : 0;
 
-            Color back = dark ? Color.FromArgb(30, 30, 30) : Color.White;
-            Color fore = dark ? Color.FromArgb(220, 220, 220) : Color.Black;
-            Color menuBack = dark ? Color.FromArgb(45, 45, 48) : SystemColors.Control;
-            Color menuFore = dark ? Color.FromArgb(240, 240, 240) : SystemColors.ControlText;
+            // Apply Title Bar Theme
+            try
+            {
+                DwmSetWindowAttribute(this.Handle, DWMWA_USE_IMMERSIVE_DARK_MODE, ref useDark, sizeof(int));
+            }
+            catch { }
 
-            this.BackColor = back; txtContent.BackColor = back; txtContent.ForeColor = fore;
-            menuStrip.BackColor = menuBack; menuStrip.ForeColor = menuFore;
-            menuStrip.Renderer = dark ? new DarkModeRenderer() : new ToolStripProfessionalRenderer();
-            menuStrip.Invalidate();
-            statusStrip.BackColor = menuBack; statusStrip.ForeColor = menuFore;
-            foreach (ToolStripItem item in menuStrip.Items) UpdateMenuItemColors(item, menuBack, menuFore);
+            // Notify Editor of Theme Change (Important for Syntax Colors)
+            txtContent.IsDarkMode = _isDarkMode;
+
+            if (_isDarkMode)
+            {
+                // Dark Theme Colors
+                this.BackColor = Color.FromArgb(45, 45, 48);
+                this.ForeColor = Color.White;
+
+                txtContent.BackColor = Color.FromArgb(30, 30, 30);
+                txtContent.ForeColor = Color.White;
+
+                statusStrip.BackColor = Color.FromArgb(45, 45, 48);
+                statusStrip.ForeColor = Color.White;
+
+                menuStrip.BackColor = Color.FromArgb(45, 45, 48);
+                menuStrip.ForeColor = Color.White;
+                menuStrip.Renderer = new DarkModeRenderer();
+            }
+            else
+            {
+                // Light/Default Theme Colors
+                this.BackColor = SystemColors.Control;
+                this.ForeColor = SystemColors.ControlText;
+
+                txtContent.BackColor = Color.White;
+                txtContent.ForeColor = Color.Black;
+
+                statusStrip.BackColor = SystemColors.Control;
+                statusStrip.ForeColor = SystemColors.ControlText;
+
+                menuStrip.BackColor = SystemColors.Control;
+                menuStrip.ForeColor = SystemColors.ControlText;
+                menuStrip.Renderer = new ToolStripProfessionalRenderer();
+            }
+
+            // Refresh controls
+            this.Invalidate();
         }
-
-        private void UpdateMenuItemColors(ToolStripItem item, Color back, Color fore)
-        {
-            item.BackColor = back; item.ForeColor = fore;
-            if (item is ToolStripMenuItem mi) foreach (ToolStripItem sub in mi.DropDownItems) UpdateMenuItemColors(sub, back, fore);
-        }
-
-        #endregion
-
-        #region Events
-
-        private void NotepadForm_FormClosing(object? sender, FormClosingEventArgs e)
-        {
-            if (!ConfirmSave()) { e.Cancel = true; return; }
-            _settings.IsMaximized = this.WindowState == FormWindowState.Maximized;
-            if (this.WindowState == FormWindowState.Normal) { _settings.WindowX = this.Location.X; _settings.WindowY = this.Location.Y; _settings.WindowWidth = this.Size.Width; _settings.WindowHeight = this.Size.Height; }
-            else { _settings.WindowX = this.RestoreBounds.X; _settings.WindowY = this.RestoreBounds.Y; _settings.WindowWidth = this.RestoreBounds.Width; _settings.WindowHeight = this.RestoreBounds.Height; }
-            _settings.FontFamily = txtContent.Font.FontFamily.Name; _settings.FontSize = txtContent.Font.Size; _settings.FontStyle = (int)txtContent.Font.Style;
-            _settings.WordWrap = txtContent.WordWrap; _settings.StatusBarVisible = statusStrip.Visible; _settings.SmoothScrolling = txtContent.EnableSmoothScrolling;
-            _settings.Save();
-        }
-
-        private void NotepadForm_DragEnter(object? sender, DragEventArgs e) { if (e.Data != null && e.Data.GetDataPresent(DataFormats.FileDrop)) e.Effect = DragDropEffects.Copy; }
-        private void NotepadForm_DragDrop(object? sender, DragEventArgs e) { if (e.Data != null && e.Data.GetDataPresent(DataFormats.FileDrop)) { string[]? files = (string[]?)e.Data.GetData(DataFormats.FileDrop); if (files != null && files.Length > 0 && ConfirmSave()) LoadFile(files[0]); } }
-
-        #endregion
     }
 }
